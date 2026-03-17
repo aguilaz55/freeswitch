@@ -1125,6 +1125,17 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
 				ice->rready = 1;
 			}
 
+			/* FIX: Also mark ice->ready on binding response.
+			 * ice-lite peers (e.g. WhatsApp/Meta) never send binding requests,
+			 * only responses. Without this, do_dtls() never starts because it
+			 * requires both rready && ready. A successful binding response proves
+			 * the connectivity path works in both directions. (GH #2545, #2904) */
+			if (!ice->ready) {
+				ice->ready = 1;
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+					"ICE ready set from binding response (ice-lite peer compatibility)\n");
+			}
+
 			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG6, "Received STUN Binding Response from %s\n", from_host);
 
 			if (ice->ice_params) {
