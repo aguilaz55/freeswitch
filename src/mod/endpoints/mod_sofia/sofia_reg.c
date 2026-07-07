@@ -2062,6 +2062,20 @@ uint8_t sofia_reg_handle_register_token(nua_t *nua, sofia_profile_t *profile, nu
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "from-host", reg_host);
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "presence-hosts", profile->presence_hosts ? profile->presence_hosts : "n/a");
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "contact", contact_str);
+			/* TELVOX PATCH (2026-07-06): Contact CRUDO con todos sus header-params
+			   (incl. +sip.instance / reg-id de RFC 5626, que contact_str pierde).
+			   Lo consume telvox-regdedup para dedup de bindings por device — lo
+			   que mod_sofia no hace nativo. Solo enriquece el evento; cero cambio
+			   de lógica. Re-aplicar en upgrades (ver HOWTO_UPGRADE_FREESWITCH). */
+			/* OJO: aquí 'contact' está SHADOWED por un char* local (URL, línea ~1928);
+			   el header SIP crudo real es sip->sip_contact. */
+			if (sip && sip->sip_contact) {
+				char *telvox_full_contact = sip_header_as_string(nua_handle_home(nh), (void *) sip->sip_contact);
+				if (telvox_full_contact) {
+					switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "contact-full", telvox_full_contact);
+					su_free(nua_handle_home(nh), telvox_full_contact);
+				}
+			}
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "call-id", call_id);
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "rpid", rpid);
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "status", reg_desc);
