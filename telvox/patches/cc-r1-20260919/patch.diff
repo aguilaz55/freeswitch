@@ -1,0 +1,15 @@
+--- baseline/mod_callcenter.c
++++ candidate/mod_callcenter.c
+@@ -2333,6 +2333,12 @@
+ 			switch_safe_free(sql);
+ 
+ 			if (atoi(res) == 0) {
++				/* This thread owns the callback session returned by originate.
++				 * It cleared the pre-answer marker before losing the member claim,
++				 * so the winner/member cleanup cannot find this exact B leg. */
++				if (!strcasecmp(h->agent_type, CC_AGENT_TYPE_CALLBACK)) {
++					switch_channel_hangup(agent_channel, SWITCH_CAUSE_LOSE_RACE);
++				}
+ 				goto done;
+ 			}
+ 			switch_core_session_hupall_matching_var("cc_member_pre_answer_uuid", h->member_uuid, SWITCH_CAUSE_LOSE_RACE);
