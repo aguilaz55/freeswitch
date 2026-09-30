@@ -1794,6 +1794,13 @@ static void our_sofia_event_callback(nua_event_t event,
 	case nua_i_invite:
 		if (session && sofia_private) {
 			if (sofia_private->is_call > 1) {
+				if (sofia_test_pflag(profile, PFLAG_TELVOX_STRICT_EDGE) && sip && sip->sip_replaces) {
+					/* Telvox strict edge: reINVITE con Replaces rechazado (el INVITE inicial se rechaza en sofia_handle_sip_i_invite). */
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+									  "telvox-strict-edge: reINVITE con Replaces rechazado en perfil %s\n", profile->name);
+					nua_respond(nh, SIP_403_FORBIDDEN, TAG_END());
+					break;
+				}
 				sofia_handle_sip_i_reinvite(session, nua, profile, nh, sofia_private, sip, de, tags);
 			} else {
 				sofia_private->is_call++;
@@ -4672,6 +4679,7 @@ switch_status_t config_sofia(sofia_config_t reload, char *profile_name)
 					sofia_clear_pflag(profile, PFLAG_AUTH_REQUIRE_USER);
 					sofia_clear_pflag(profile, PFLAG_AUTH_CALLS_ACL_ONLY);
 					sofia_clear_pflag(profile, PFLAG_USE_PORT_FOR_ACL_CHECK);
+					sofia_clear_pflag(profile, PFLAG_TELVOX_STRICT_EDGE);
 					profile->shutdown_type = "false";
 					profile->local_network = "localnet.auto";
 					sofia_set_flag(profile, TFLAG_ENABLE_SOA);
@@ -6040,6 +6048,17 @@ switch_status_t config_sofia(sofia_config_t reload, char *profile_name)
 							sofia_set_pflag(profile, PFLAG_AUTH_CALLS_ACL_ONLY);
 						}  else {
 							sofia_clear_pflag(profile, PFLAG_AUTH_CALLS_ACL_ONLY);
+						}
+					} else if (!strcasecmp(var, "telvox-strict-edge")) {
+						/* Telvox: borde estricto para troncales de terceros (BYOC). Con true:
+						 *  - un INVITE con cabecera Replaces se rechaza con 403 antes de cualquier procesamiento
+						 *    (evita intercept/replace de sesiones ajenas por UUID);
+						 *  - "gw+<nombre>" o ";gw=<nombre>" solo se resuelve contra gateways de ESTE perfil
+						 *    (evita saltar al contexto de un gateway de otro perfil). */
+						if (switch_true(val)) {
+							sofia_set_pflag(profile, PFLAG_TELVOX_STRICT_EDGE);
+						} else {
+							sofia_clear_pflag(profile, PFLAG_TELVOX_STRICT_EDGE);
 						}
 					} else if (!strcasecmp(var, "use-port-for-acl-check")) {
 						if(switch_true(val)) {
@@ -10450,6 +10469,14 @@ void sofia_handle_sip_i_invite(switch_core_session_t *session, nua_t *nua, sofia
 
 	tech_pvt = switch_core_session_get_private(session);
 
+	/* Telvox strict edge: nunca aceptar Replaces desde un borde de terceros. */
+	if (sofia_test_pflag(profile, PFLAG_TELVOX_STRICT_EDGE) && sip && sip->sip_replaces) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+						  "telvox-strict-edge: INVITE con Replaces rechazado en perfil %s\n", profile->name);
+		nua_respond(nh, SIP_403_FORBIDDEN, TAG_IF(!zstr(session_id_header), SIPTAG_HEADER_STR(session_id_header)), TAG_END());
+		goto fail;
+	}
+
 	sip_invite_time = switch_micro_time_now();
 
 	if (!sip || !sip->sip_request || !sip->sip_request->rq_method_name) {
@@ -11322,13 +11349,25 @@ void sofia_handle_sip_i_invite(switch_core_session_t *session, nua_t *nua, sofia
 		char *extension = NULL;
 
 		if (gw_name && ((gateway = sofia_reg_find_gateway(gw_name)))) {
-			gw_param_name = NULL;
-			extension = gateway->extension;
+			if (sofia_test_pflag(profile, PFLAG_TELVOX_STRICT_EDGE) && gateway->profile != profile) {
+				/* Telvox strict edge: gateway de otro perfil → se ignora (se queda el contexto del perfil). */
+				sofia_reg_release_gateway(gateway);
+				gateway = NULL;
+				gw_param_name = NULL;
+			} else {
+				gw_param_name = NULL;
+				extension = gateway->extension;
+			}
 		}
 
 		if (!gateway && gw_param_name) {
 			if ((gateway = sofia_reg_find_gateway(gw_param_name))) {
-				extension = gateway->real_extension;
+				if (sofia_test_pflag(profile, PFLAG_TELVOX_STRICT_EDGE) && gateway->profile != profile) {
+					sofia_reg_release_gateway(gateway);
+					gateway = NULL;
+				} else {
+					extension = gateway->real_extension;
+				}
 			}
 		}
 

@@ -311,6 +311,8 @@ typedef enum {
 	PFLAG_AUTH_REQUIRE_USER,
 	PFLAG_AUTH_CALLS_ACL_ONLY,
 	PFLAG_USE_PORT_FOR_ACL_CHECK,
+	/* Telvox: perfil de borde para troncales de terceros (BYOC). Ver sofia.c "telvox-strict-edge". */
+	PFLAG_TELVOX_STRICT_EDGE,
 
 	/* No new flags below this line */
 	PFLAG_MAX
